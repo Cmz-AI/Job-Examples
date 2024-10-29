@@ -1,0 +1,411 @@
+--BVC Query of BGS Engineering Enablers 
+select distinct PF.PortProjID
+, p.PROJECT_ID
+, p.PRIORITY
+, p.ProjectTitle
+, case when PF.Portfolioname like 'BGS Commercial Mods Enablers -%' then 'Enabler' END AS "Designation"
+, case when PF.Portfolioname like 'BGS Commercial Mods Enablers -%' then substr(PF.Portfolioname,32,length(PF.Portfolioname)-31) 
+        when PF.portfolioname like 'Boeing Converted Freighters%' then '5 '||pf.portfolioname
+        else pf.portfolioname end as PortfolioName
+, CAST(p.projectECD AS DATE) as projectECD
+, p.projectStatus
+, p.ProgressStep
+, p.projectHealth
+, trunc(p.PROJECTUPDATEDATE) as PROJECTUPDATEDATE
+, trunc(p.completedondate) as ACD
+, p.DESCRIPTION
+, 'link/'||to_char(p.project_ID,'FM99999') as link
+, H.username as ProjectLeader
+, CAST(CC.EarliestItem AS DATE) as FirstItemACD
+, CAST(CC.LastItem AS DATE) as MostRecentCompleteItem
+, CAST(AA.EarliestItem AS DATE) as EarliestLateItem
+, CAST(AA.LastItem AS DATE) as LastLateItem
+, CAST(BB.EarliestItem AS DATE) as NextItemECD
+, CAST(BB.LastItem AS DATE)as LastItemECD
+, case 
+    when p.PROJECTECD > current_date 
+      then cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((trunc(p.PROJECTECD)-current_date) as float) 
+    else null end as Recovery_Ratio
+, case when AA.EarliestItem is not null then current_date - AA.EarliestItem
+       else null end as ProjectSlideDays
+, case when p.projectstatus in('Not Started','On-Hold') then 'Gray'
+       when p.projectstatus = 'Complete' then 'Blue'
+       when p.completedondate is not null then 'Blue'
+       when p.ProjectECD < current_date then 'Red'
+       when p.ProjectECD is null then 'Red'
+       when cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((1+trunc(p.PROJECTECD)-current_date) as float)>.2 then 'Red'
+       when cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((1+trunc(p.PROJECTECD)-current_date) as float)<=.2 then 'Yellow'
+       when p.ProjectECD < BB.LastItem then 'Yellow'
+       when BB.EarliestItem-current_date>31 then 'Yellow'
+       when BB.EarliestItem is null then 'Yellow'
+       else 'Green' end as AnalyticHealth
+, BEN.baseline_Hours
+, BEN.estimated_HoursSaved
+, BEN.actual_HoursSaved
+, BEN23.estimated_HoursSaved as "2023_EndOfYear_EstimatedHours"
+, BEN24.estimated_HoursSaved as "2024_EndOfYear_EstimatedHours"
+, substr(PF2.Portfolioname,13,length(PF2.Portfolioname)-12) as "Quality_Portfolio"
+, substr(PF3.Portfolioname,13,length(PF3.Portfolioname)-12) as "Productivity"
+from PLACEHOLDER.proj p 
+  left outer join PLACEHOLDER.proj_persons H on H.project_ID=p.project_ID and TD_Role='Project Leader'
+  left outer join PLACEHOLDER.PP z on z.project_ID=p.project_ID
+  left outer join  --add flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+    group by project_ID
+    ) BEN on BEN.project_ID=p.project_ID
+  left outer join  --add 2023 End of year flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+      and year(benefitdate)=2023
+    group by project_ID
+    ) BEN23 on BEN23.project_ID=p.project_ID
+  left outer join  --add 2024 End of year flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+      and year(benefitdate)=2024
+    group by project_ID
+    ) BEN24 on BEN24.project_ID=p.project_ID
+  inner join  --add lowest level portfolios. inner join filters projects to the criteria in this subquery
+    (select FFB.project_ID, FFB.portfolioname, to_number(Concat(FFB.PORTFOLIOID,trim(FFB.project_ID))) as PortProjID
+    from (
+      select project_ID, max(length(substr(portfolioname,1,instr(portfolioname,' ',32)))) as maxportfoliodepth 
+      from PLACEHOLDER.PP
+      where portfolioname like 'BGS Commercial Mods Enablers -%' --or portfolioname like 'Boeing Converted Freighters%'
+        and to_number(Concat(PORTFOLIOID,trim(project_ID))) not in(667734928,683834928,667734939,683734928,683834939,707134939,683734921,683834921--,667734854,683834854 --BGS Comm Mods projects entered before portfolio assignment
+          ,680937814,680934857,680937815,680937755,680940252 --Brielmaier duplicates
+          ,670137814,670134857,670137815,670137755 --Woodward duplicates
+          ,669437755 --Wang duplicates
+          ,694037838 --Klein duplicates
+          ,670937477,670937467,670938672,670938673,670938674,670938675--Pourzand Duplicates
+          ,655437975,683837975,669037760 --,669138159 --specific projects
+          )
+      group by project_ID) FFA
+    left outer join PLACEHOLDER.PPFFB on FFA.project_ID=FFB.project_ID
+      and FFA.maxportfoliodepth=length(substr(FFB.portfolioname,1,instr(FFB.portfolioname,' ',32)))
+      and FFB.portfolioid not in(7420)
+    ) PF on PF.project_ID=p.project_ID
+    
+    left outer join  PLACEHOLDER.PPPF2--Specific collector portfolios
+      on PF2.project_ID=p.project_ID and PF2.portfolioid in(7387, 7388, 7389)
+      
+    left outer join  PLACEHOLDER.PPPF3--Specific collector portfolios
+      on PF3.project_ID=p.project_ID and PF3.portfolioid in(6890, 7288, 7071)
+    
+  left outer join   --Query AA is the list of all projects with a late milestone or next step
+    (Select a.project_ID --group next steps and milestones together, and use min/max
+      , min(a.item_ecd) as EarliestItem
+      , max(a.item_ecd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.ecd) as ITEM_ECD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_items I
+      where  I.acd is null and i.itemtype ='NEXTSTEP' --and i.project_ID=33540
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.milestonedate) as ITEM_ECD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_milestones M
+      where m.acd is null
+        and m.milestonedate<current_date --and m.project_ID=33540
+      ) A   
+    where A.ItemStatus in('Late Item','Missing ECD') --and A.project_ID=33540
+    group by A.project_ID
+    ) AA on AA.project_ID=p.project_ID and p.projecthealth not in('Gray','Blue')
+  left outer join   --Query BB is the list of all projects with an upcoming milestone or next step
+    (Select B.project_ID --group next steps and milestones together, and use min/max
+      , min(b.item_ecd) as EarliestItem
+      , max(b.item_ecd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.ecd) as ITEM_ECD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_items I
+      where  I.acd is null and i.itemtype ='NEXTSTEP'
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.milestonedate) as ITEM_ECD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_milestones M
+      where m.acd is null
+        and m.milestonedate>=current_date
+      ) B 
+    where B.ItemStatus = 'Upcoming' --and B.project_ID=35010
+    group by B.project_ID
+  ) BB on BB.project_ID=p.project_ID and p.projecthealth not in('Gray','Blue')
+  left outer join   --Query CC is the list of all projects with a completed milestone or next step
+    (Select c.project_ID --group next steps and milestones together, and use min/max
+      , min(c.item_acd) as EarliestItem
+      , max(c.item_acd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.acd) as ITEM_ACD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_items I
+      where  i.itemtype in('ACCOMPLISHMENT','NEXTSTEP')
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.acd) as ITEM_ACD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from PLACEHOLDER.proj_milestones M
+      where m.acd is not null
+      ) C
+    where C.ItemStatus = 'Complete' --and C.project_ID=38271
+    group by C.project_ID
+  ) CC on CC.project_ID=p.project_ID 
+where p.projectstatus not in ('Canceled')
+  --and p.projecthealth not in ('Gray')
+  and PF.PortProjID not in(667734928,667734921,683834928,667734939,683734928,683834939,707134939,683734921,683834921--,667734854,683834854 --BGS Comm Mods projects entered before portfolio assignment
+    ,680937814,680934857,680937815,680937755,680940252 --Brielmaier duplicates
+    ,670137814,670134857,670137815,670137755 --Woodward duplicates
+    ,669437755 --Wang duplicates
+    ,694037838 --Klein duplicates
+    ,670937477,670937467,670938672,670938673,670938674,670938675--Pourzand Duplicates
+    ,655437975,683837975,669037760 --,669138159 --specific projects
+    )
+UNION
+(select distinct PF.PortProjID
+, p.PROJECT_ID
+, p.PRIORITY
+, p.ProjectTitle
+, case when p.PROJECT_ID IS NOT NULL THEN 'Special Project' END AS "Designation"
+, case when PF.Portfolioname like 'BGS Commercial Mods S%' then substr(PF.Portfolioname,40,length(PF.Portfolioname)-39) 
+        when PF.Portfolioname like 'BGS Commercial Mods T%-%' then substr(PF.Portfolioname,39,length(PF.Portfolioname)-38) 
+        when PF.portfolioname like 'Boeing Converted Freighters%' then '5 '||PF.portfolioname
+        when PF.Portfolioname like 'BGS Commercial Mods %' then substr(PF.Portfolioname,21,length(PF.Portfolioname)-20)
+        else PF.Portfolioname end as "Portfolio Name"
+, CAST(p.projectECD AS DATE) as projectECD
+, p.projectStatus
+, p.ProgressStep
+, p.projectHealth
+, trunc(p.PROJECTUPDATEDATE) as PROJECTUPDATEDATE
+, trunc(p.completedondate) as ACD
+, p.DESCRIPTION
+, 'link/'||to_char(p.project_ID,'FM99999') as link
+, H.username as ProjectLeader
+, CAST(CC.EarliestItem AS DATE) as FirstItemACD
+, CAST(CC.LastItem AS DATE) as MostRecentCompleteItem
+, CAST(AA.EarliestItem AS DATE) as EarliestLateItem
+, CAST(AA.LastItem AS DATE) as LastLateItem
+, CAST(BB.EarliestItem AS DATE) as NextItemECD
+, CAST(BB.LastItem AS DATE)as LastItemECD
+, case 
+    when p.PROJECTECD > current_date 
+      then cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((trunc(p.PROJECTECD)-current_date) as float) 
+    else null end as Recovery_Ratio
+, case when AA.EarliestItem is not null then current_date - AA.EarliestItem
+       else null end as ProjectSlideDays
+, case when p.projectstatus in('Not Started','On-Hold') then 'Gray'
+       when p.projectstatus = 'Complete' then 'Blue'
+       when p.completedondate is not null then 'Blue'
+       when p.ProjectECD < current_date then 'Red'
+       when p.ProjectECD is null then 'Red'
+       when cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((1+trunc(p.PROJECTECD)-current_date) as float)>.2 then 'Red'
+       when cast((current_date-trunc(AA.EarliestItem)) as float)/ cast((1+trunc(p.PROJECTECD)-current_date) as float)<=.2 then 'Yellow'
+       when p.ProjectECD < BB.LastItem then 'Yellow'
+       when BB.EarliestItem-current_date>31 then 'Yellow'
+       when BB.EarliestItem is null then 'Yellow'
+       else 'Green' end as AnalyticHealth
+, BEN.baseline_Hours
+, BEN.estimated_HoursSaved
+, BEN.actual_HoursSaved
+, BEN23.estimated_HoursSaved as "2023_EndOfYear_EstimatedHours"
+, BEN24.estimated_HoursSaved as "2024_EndOfYear_EstimatedHours"
+, substr(PF2.Portfolioname,13,length(PF2.Portfolioname)-12) as "Quality_Portfolio"
+, substr(PF3.Portfolioname,13,length(PF3.Portfolioname)-12) as "Productivity"
+
+from PLACEHOLDER.proj p 
+  left outer join PLACEHOLDER.proj_persons H on H.project_ID=p.project_ID and TD_Role='Project Leader'
+  left outer join PLACEHOLDER.PPz on z.project_ID=p.project_ID
+  left outer join  --add flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+    group by project_ID
+    ) BEN on BEN.project_ID=p.project_ID
+  left outer join  --add 2023 End of year flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+      and year(benefitdate)=2023
+    group by project_ID
+    ) BEN23 on BEN23.project_ID=p.project_ID
+  left outer join  --add 2024 End of year flow hours benefits
+    (select project_ID
+    , sum(baselinevalue) AS baseline_Hours
+    , sum(estimatedbenefit) AS estimated_HoursSaved
+    , sum(actualbenefit) as actual_HoursSaved
+    from PLACEHOLDER.PROJ_BENEFITTYPES
+    where benefittypeID=6 --type 6 correpsonds to flow hours
+      and year(benefitdate)=2024
+    group by project_ID
+    ) BEN24 on BEN24.project_ID=p.project_ID
+  inner join  --add lowest level portfolios. inner join filters projects to the criteria in this subquery
+    (select distinct FFB.project_ID, FFB.portfolioname, to_number(Concat(FFB.PORTFOLIOID,trim(FFB.project_ID))) as PortProjID
+    from (
+      select FFC.project_ID, max(length(substr(FFD.portfolioname,1,instr(FFD.portfolioname,' ',40)))) as maxportfoliodepth 
+        ,max(FFC.EnablerCheck) as EnablerCheck
+      from (
+        select project_ID, case when portfolioname like '%Enablers%' then 1 else 0 end as EnablerCheck 
+        from PLACEHOLDER.PP
+        where portfolioname like 'BGS Commercial Mods%' or portfolioname like 'Boeing Converted Freighters%') FFC
+      left outer join PLACEHOLDER.PPFFD on FFC.project_ID=FFD.project_ID
+      where portfolioname like 'BGS Commercial Mods %' or portfolioname like 'Boeing Converted Freighters%'
+      group by FFC.project_ID) FFA
+    left outer join PLACEHOLDER.PPFFB on FFA.project_ID=FFB.project_ID
+      and FFA.maxportfoliodepth=length(substr(FFB.portfolioname,1,instr(FFB.portfolioname,' ',40)))
+      and FFA.EnablerCheck=0
+      and FFB.project_ID is not null
+    ) PF on PF.project_ID=p.project_ID 
+          and PF.portfolioname not like '%Enablers%' 
+    
+    left outer join  PLACEHOLDER.PPPF2--Specific collector portfolios
+      on PF2.project_ID=p.project_ID and PF2.portfolioid in(7387, 7388, 7389)
+      
+    left outer join  PLACEHOLDER.PPPF3--Specific collector portfolios
+      on PF3.project_ID=p.project_ID and PF3.portfolioid in(6890, 7288, 7071)
+    
+  left outer join   --Query AA is the list of all projects with a late milestone or next step
+    (Select a.project_ID --group next steps and milestones together, and use min/max
+      , min(a.item_ecd) as EarliestItem
+      , max(a.item_ecd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.ecd) as ITEM_ECD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.pji I
+      where  I.acd is null and i.itemtype ='NEXTSTEP' --and i.project_ID=33540
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.milestonedate) as ITEM_ECD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.pmm  M
+      where m.acd is null
+        and m.milestonedate<current_date --and m.project_ID=33540
+      ) A   
+    where A.ItemStatus in('Late Item','Missing ECD') --and A.project_ID=33540
+    group by A.project_ID
+    ) AA on AA.project_ID=p.project_ID and p.projecthealth not in('Gray','Blue')
+  left outer join   --Query BB is the list of all projects with an upcoming milestone or next step
+    (Select B.project_ID --group next steps and milestones together, and use min/max
+      , min(b.item_ecd) as EarliestItem
+      , max(b.item_ecd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.ecd) as ITEM_ECD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.pji  I
+      where  I.acd is null and i.itemtype ='NEXTSTEP'
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.milestonedate) as ITEM_ECD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.pmm M
+      where m.acd is null
+        and m.milestonedate>=current_date
+      ) B 
+    where B.ItemStatus = 'Upcoming' --and B.project_ID=35010
+    group by B.project_ID
+  ) BB on BB.project_ID=p.project_ID and p.projecthealth not in('Gray','Blue')
+  left outer join   --Query CC is the list of all projects with a completed milestone or next step
+    (Select c.project_ID --group next steps and milestones together, and use min/max
+      , min(c.item_acd) as EarliestItem
+      , max(c.item_acd) as LastItem
+    from ( 
+      select distinct i.project_ID, i.item
+        , i.itemtype
+        , trunc(i.acd) as ITEM_ACD
+        --, i.assigneename
+        , case when i.acd is not null then 'Complete'
+          when i.ecd<current_date then 'Late Item'
+          when i.ecd is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.projit I
+      where  i.itemtype in('ACCOMPLISHMENT','NEXTSTEP')
+    UNION ALL --Get the data for milestones
+      select distinct m.project_ID, m.Milestone as item
+        , case when milestone_id is not null then 'MILESTONE' end as itemtype
+        , trunc(m.acd) as ITEM_ACD
+        , case when m.acd is not null then 'Complete'
+          when m.milestonedate<current_date then 'Late Item'
+          when m.milestonedate is null then 'Missing ECD'
+          else 'Upcoming' end as ItemStatus
+      from placeholder.pm M
+      where m.acd is not null
+      ) C
+    where C.ItemStatus = 'Complete' --and C.project_ID=38271
+    group by C.project_ID
+  ) CC on CC.project_ID=p.project_ID 
+where p.projectstatus not in ('Canceled')
+  --and p.projecthealth not in ('Gray')
+  and PF.PortProjID not in(667734928,667734921,683834928,667734939,683734928,683834939,707134939,683734921,683834921--,667734854,683834854 --BGS Comm Mods projects entered before portfolio assignment
+    ,680937814,680934857,680937815,680937755,680940252 --Brielmaier duplicates
+    ,670137814,670134857,670137815,670137755 --Woodward duplicates
+    ,669437755 --Wang duplicates
+    ,694037838 --Klein duplicates
+    ,670937477,670937467,670938672,670938673,670938674,670938675--Pourzand Duplicates
+    ,655437975,683837975,669037760 --,669138159 --specific projects
