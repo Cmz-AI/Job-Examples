@@ -1,0 +1,35 @@
+"""SET NOCOUNT ON
+SELECT 
+CONCAT(c.CED_PREF_SUR, ', ', c.CED_PREF_GIV, ' ', c.CED_PREF_MI) AS FullName
+,c.[BEMS_ID]
+,c.[JOBCODE]
+,c.DIVISION_CD
+,c.CITY
+,c.STATE
+,c.COUNTRY
+,CONCAT(m.CED_PREF_SUR, ', ', m.CED_PREF_GIV, ' ', m.CED_PREF_MI) AS ManagerName
+,CONCAT(z.CED_PREF_SUR, ', ', z.CED_PREF_GIV, ' ', z.CED_PREF_MI) AS SeniorLeader
+,e.[CollegeName]
+,e.[SkillCategory] AS Roles
+,e.[SkillName]
+,e.[SkillType]
+,e.[Value] AS Assessment
+,e.[SkillLevel] AS SkillLevelDescription
+FROM AT.[CUE] c
+LEFT JOIN AT.[CUE] m ON c.BEMS_RPT_TO = m.EMPLID
+LEFT JOIN AT.[BI].[CUE] z ON m.BEMS_RPT_TO = z.EMPLID
+LEFT JOIN BT.[dbo].SKH e ON c.BEMS_ID = e.BEMSID
+WHERE
+c.DEPARTMENT_DESC NOT LIKE '%Terminated Cost Center%'
+AND c.HR_DEPT_ID NOT LIKE '%TERM_ORG%'
+AND c.BEMS_RPT_TO <> 0
+AND e.isActive = 1
+AND e.[CollegeName] LIKE '%Avionics%' 
+OR e.[CollegeName] LIKE '%Cabin Systems%'
+OR e.[CollegeName] LIKE '%Electrical%'
+OR e.[CollegeName] LIKE '%Environmental Control Systems%'
+OR e.[CollegeName] LIKE '%Payloads%'
+OR e.[CollegeName] LIKE '%Proposals%'
+OR e.[CollegeName] LIKE '%Service Bulletins%'
+OR e.[CollegeName] LIKE '%Structures%'
+ORDER BY e.CollegeName"""
