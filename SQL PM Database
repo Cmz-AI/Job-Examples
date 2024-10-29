@@ -1,0 +1,107 @@
+SELECT distinct P.PROJECTID 
+         , trunc(R.DATEENTERED) AS "0_RFP_FROM_CUSTOMER"
+         --, trunc(P.DATEASSIGNED) AS PROPOSALASSIGNED
+         , trunc(C.CONTRACTEDDATEASSIGNED) AS "1_CONTRACTASSIGNED"
+         , trunc(C.ECMCOMPLETIONDATE) AS "2_ECMCOMPLETIONDATE"
+         --, CASE WHEN P.EXTENDEDCAD2 IS NOT NULL THEN trunc(P.EXTENDEDCAD2) ELSE CASE WHEN P.EXTENDEDCAD1 IS NOT NULL THEN trunc(P.EXTENDEDCAD1) ELSE trunc(P.PROPOSEDCAD) END END AS FINALPROPOSEDCAD
+         --, trunc(P.CURRENT_CAD) AS CURRENT_CAD
+         , trunc(DS4.ACTUALSHIPPEDDATE_MIN_SB) AS "4_SB_FIRST_ACTUALSHIPPEDDATE"
+         , trunc(D5.ACTUALSHIPPEDDATE_MAX_SB) AS "5_PARTS_ACTUALSHIPPEDDATE"
+         , trunc(DS6.ACTUALSHIPPEDDATE_MAX_SB) AS "6.2_SB_LAST_ACTUALSHIPPEDDATE"
+         , trunc(PS.statusdate) as "6_RevenueBooked"
+         , P.MODEL
+         , P.AIRLINECODENAME
+         , P.AIRLINEFULLNAME
+         , P.REGIONNAME
+         , P.ATA
+         , P.PROJECTTITLE
+         , C.PRODUCT
+         , trunc(P.CUSTREQSHIPDATE) AS CUSTREQSHIPDATE
+         , trunc(DS4.COMMITDATE_MIN_SB) as EARLIEST_COMMITDATE_SB
+         , trunc(D5.COMMITDATE_MIN_SB) as EARLIEST_COMMITDATE_TKShip
+         , trunc(D.COMMITDATE_MAX) as LAST_COMMITDATE
+         , trunc(S.ROUTINGGROUPLASTMODIFIEDDATE) as MgmtReview
+         , E.TOTALFLOWATPROPOSAL
+         , E.TOTALFLOWATECM
+         , E.ACTUALSCHEDULE
+         --, D.DELIVERABLENUMBERTYPEDESC
+         --, S.ROUTINGGROUP
+         --, S.GROUPSTATUS
+
+FROM     PLACEHOLDER.REIN R
+         LEFT OUTER JOIN PLACEHOLDER.REIN2 P ON (R.REQUESTID = P.REQUESTID)
+         LEFT OUTER JOIN PLACEHOLDER.REIN3 C ON C.PROJECTID = P.PROJECTID
+         --LEFT OUTER JOIN PLACEHOLDER.REIN4 D ON D.PROJECTID=P.PROJECTID and D.DELIVERABLENUMBERTYPEDESC in('SB, Avail in MBF','SB - UK','SB, Paper Ship')
+         LEFT OUTER JOIN 
+          (
+          select PROJECTID, min(COMMITDATE) as COMMITDATE_MIN, max(COMMITDATE) as COMMITDATE_MAX
+            , min(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MIN, max(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MAX
+          from PLACEHOLDER.REIN4
+          where DELIVERABLENUMBERTYPEDESC in ('SB, Avail in MBF','SB - UK','SB, Paper Ship', 'AFM Ship'
+          , 'S/W - Direct Ship', 'Data Package', 'WBM', 'S/W Prototype in BEDS'
+          , 'FIM - Fault Isolation Manual', 'Drawing Package', 'IPC Illustrated Parts Catalog', 'S/W'
+          , 'AMM - Sub Svc', 'AMM - Airplane Maint Manual', 'S/W in BEDS', 'AFM, Avail in MBF'
+          , 'WDM/SSM - Wire Design Manual/System Schematic Manual', 'WDM - Wire Diagram Manual'
+          , 'IPC - Illustrated Parts Catalog', 'S/W - Validation', 'SB, Unapproved Ship'
+          , 'End Item', 'T/K', 'Ship Short', 'SPK', 'End Item - AOG'
+          , 'End Item - Direct Ship', 'After Delivery', 'T/K - Direct Ship', 'Subkit', 'End Item - UK - Direct Ship'
+          , 'SONIC Spare', 'Ship Short - Validation', 'T/K - Validation', 'End Item - Imbedded BFE', 'T/K - UK', 'End Item - Dangerous Goods'
+          , 'T/K Pre Position', 'Ship Short - Dangerous Goods', 'End Item Frozen', 'End Item - U/K', 'Ship Short - Direct Ship')
+          and deliverablequantity<>0
+          group by PROJECTID
+          ) D ON D.PROJECTID=P.PROJECTID 
+         LEFT OUTER JOIN 
+          (
+          select PROJECTID, min(COMMITDATE) as COMMITDATE_MIN_SB, max(COMMITDATE) as COMMITDATE_MAX_SB
+            , min(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MIN_SB, max(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MAX_SB
+          from PLACEHOLDER.REIN4
+          where DELIVERABLENUMBERTYPEDESC in ('SB, Unapproved Ship')
+          and deliverablequantity<>0
+          group by PROJECTID
+          ) DS4 ON DS4.PROJECTID=P.PROJECTID 
+         LEFT OUTER JOIN 
+          (
+          select PROJECTID, min(COMMITDATE) as COMMITDATE_MIN_SB, max(COMMITDATE) as COMMITDATE_MAX_SB
+            , min(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MIN_SB, max(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MAX_SB
+          from PLACEHOLDER.REIN4
+          where DELIVERABLENUMBERTYPEDESC in ('SB, Avail in MBF','SB - UK')
+          and deliverablequantity<>0
+          group by PROJECTID
+          ) DS6 ON DS6.PROJECTID=P.PROJECTID 
+         LEFT OUTER JOIN 
+          (
+          select PROJECTID, min(COMMITDATE) as COMMITDATE_MIN_SB, max(COMMITDATE) as COMMITDATE_MAX_SB
+            , min(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MIN_SB, max(ACTUALSHIPPEDDATE) as ACTUALSHIPPEDDATE_MAX_SB
+          from PLACEHOLDER.REIN4
+          where DELIVERABLENUMBERTYPEDESC in ('T/K', 'T/K - UK')
+          and deliverablequantity<>0
+          group by PROJECTID
+          ) D5 ON D5.PROJECTID=P.PROJECTID 
+         
+          LEFT OUTER JOIN PLACEHOLDER.REIN5 PS on PS.projectid = P.PROJECTID and ps.projectstatusdesc = 'Revenue Booked'
+          LEFT OUTER JOIN 
+          ( select SA.PROJECTID, SA.ROUTINGGROUP, SA.GROUPSTATUS, SA.ROUTINGGROUPLASTMODIFIEDDATE
+            from PLACEHOLDER.REIN6 SA
+              LEFT OUTER JOIN
+                (select PROJECTID, MAX(ROUTINGGROUPLASTMODIFIEDDATE) AS LASTMODIFIED
+                from PLACEHOLDER.REIN6
+                where GROUPSTATUS = 'Complete' and ROUTINGGROUP = 'Mgmt Review'
+                GROUP BY PROJECTID) SM on SM.PROJECTID=SA.PROJECTID 
+            where SM.LASTMODIFIED=SA.ROUTINGGROUPLASTMODIFIEDDATE
+              --and SA.GROUPSTATUS not in ('N/A')
+          ) S ON S.PROJECTID = P.PROJECTID
+          LEFT OUTER JOIN PLACEHOLDER.REIN7 E on E.PROJECTID=P.PROJECTID 
+WHERE    --R.REQUESTID in ('116706','116689') and
+         --p.projectid in('169371','169372') /*and
+         (C.PRODUCTLINENAME = 'Modification Services' or
+         C.PRODUCT in('Connectivity','Interiors and In Flight Entertainment','Avionics'
+          ,'Airframe Performance and Systems','Airplane Performance Improvements','Mod Services Other'))
+         and C.CONTRACTEDDATEASSIGNED is not null
+         /*and P.PROJECTSTATUSDESC IN ('Revenue Booked','Project Complete','Cancelled','Superseded','Lapsed','Suspended','Rejected','Collected'
+              ,'H/F Project Evaluation','H/F Sales Accounting','100% Shipped')
+         AND (P.DATEASSIGNED >= current_date - 365 
+              OR (P.PROJECTSTATUSDESC IN ('On-Hold', 'Contract Offered', 'Accepted', 'Open', 'Re-Open', 'H/F Customer','H/F Sales Accounting'
+              ,'ROM/BQ Sent to Cust', 'CAD Extension', 'Revise Offer')-- AND R.DATEENTERED>=current_date-1000
+              ))/**/
+         /**/
+ORDER BY R.DATEENTERED, C.ECMCOMPLETIONDATE
